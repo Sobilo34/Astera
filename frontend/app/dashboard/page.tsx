@@ -1,13 +1,25 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import InvoiceCard from '@/components/InvoiceCard';
 import CreditScore from '@/components/CreditScore';
-import { getInvoice, getInvoiceCount } from '@/lib/contracts';
+import { getInvoice, getInvoiceCount, getFundedInvoice } from '@/lib/contracts';
 import { formatUSDC } from '@/lib/stellar';
 import type { Invoice } from '@/lib/types';
+
+type StatusFilter = Invoice['status'] | 'All';
+type SortOption = 'newest' | 'oldest' | 'highest' | 'due-soonest';
+
+const STATUS_TABS: StatusFilter[] = ['All', 'Pending', 'Funded', 'Paid', 'Defaulted'];
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: 'newest', label: 'Newest first' },
+  { value: 'oldest', label: 'Oldest first' },
+  { value: 'highest', label: 'Highest amount' },
+  { value: 'due-soonest', label: 'Due soonest' },
+];
 
 export default function DashboardPage() {
   const { wallet } = useStore();
@@ -16,9 +28,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
-  const [sort, setSort] = useState<SortOption>("newest");
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('All');
+  const [sort, setSort] = useState<SortOption>('newest');
 
   useEffect(() => {
     if (!wallet.connected) {
@@ -44,7 +56,7 @@ export default function DashboardPage() {
       const committed: Record<number, bigint> = {};
       await Promise.all(
         all
-          .filter((inv) => inv.status === "Pending")
+          .filter((inv) => inv.status === 'Pending')
           .map(async (inv) => {
             try {
               const record = await getFundedInvoice(inv.id);
@@ -52,7 +64,7 @@ export default function DashboardPage() {
             } catch {
               // Not registered for co-funding yet — leave uncommitted
             }
-          })
+          }),
       );
       setCommittedMap(committed);
     } catch (e) {
@@ -78,27 +90,25 @@ export default function DashboardPage() {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
-        (inv) =>
-          inv.debtor.toLowerCase().includes(q) ||
-          inv.description.toLowerCase().includes(q)
+        (inv) => inv.debtor.toLowerCase().includes(q) || inv.description.toLowerCase().includes(q),
       );
     }
 
-    if (statusFilter !== "All") {
+    if (statusFilter !== 'All') {
       result = result.filter((inv) => inv.status === statusFilter);
     }
 
     switch (sort) {
-      case "newest":
+      case 'newest':
         result.sort((a, b) => b.createdAt - a.createdAt);
         break;
-      case "oldest":
+      case 'oldest':
         result.sort((a, b) => a.createdAt - b.createdAt);
         break;
-      case "highest":
+      case 'highest':
         result.sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
         break;
-      case "due-soonest":
+      case 'due-soonest':
         result.sort((a, b) => a.dueDate - b.dueDate);
         break;
     }
@@ -106,7 +116,7 @@ export default function DashboardPage() {
     return result;
   }, [invoices, search, statusFilter, sort]);
 
-  const isFiltered = search.trim() !== "" || statusFilter !== "All";
+  const isFiltered = search.trim() !== '' || statusFilter !== 'All';
 
   return (
     <div className="min-h-screen pt-24 pb-16 px-6">
@@ -185,7 +195,7 @@ export default function DashboardPage() {
                   />
                   {search && (
                     <button
-                      onClick={() => setSearch("")}
+                      onClick={() => setSearch('')}
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-brand-muted hover:text-white"
                     >
                       ✕
@@ -202,8 +212,8 @@ export default function DashboardPage() {
                         onClick={() => setStatusFilter(tab)}
                         className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors ${
                           statusFilter === tab
-                            ? "bg-brand-gold text-brand-dark"
-                            : "text-brand-muted hover:text-white bg-brand-card border border-brand-border"
+                            ? 'bg-brand-gold text-brand-dark'
+                            : 'text-brand-muted hover:text-white bg-brand-card border border-brand-border'
                         }`}
                       >
                         {tab}
@@ -252,7 +262,10 @@ export default function DashboardPage() {
                     <p className="text-brand-muted mb-3">No invoices match your filters.</p>
                     {isFiltered && (
                       <button
-                        onClick={() => { setSearch(""); setStatusFilter("All"); }}
+                        onClick={() => {
+                          setSearch('');
+                          setStatusFilter('All');
+                        }}
                         className="text-brand-gold hover:underline text-sm font-medium"
                       >
                         Clear filters
@@ -261,12 +274,8 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {invoices.map((inv) => (
-                      <InvoiceCard
-                        key={inv.id}
-                        invoice={inv}
-                        fundedAmount={committedMap[inv.id]}
-                      />
+                    {filtered.map((inv) => (
+                      <InvoiceCard key={inv.id} invoice={inv} fundedAmount={committedMap[inv.id]} />
                     ))}
                   </div>
                 )}
