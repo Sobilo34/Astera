@@ -1,17 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { getInvoice } from '@/lib/contracts';
+import { getInvoice, getInvoiceMetadata } from '@/lib/contracts';
 import { formatUSDC, formatDate, daysUntil } from '@/lib/stellar';
-import type { Invoice } from '@/lib/types';
+import type { Invoice, InvoiceMetadata } from '@/lib/types';
 import { useStore } from '@/lib/store';
 
 export default function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { wallet } = useStore();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
+  const [metadata, setMetadata] = useState<InvoiceMetadata | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,8 +22,10 @@ export default function InvoiceDetailPage() {
 
   async function loadInvoice() {
     try {
-      const inv = await getInvoice(parseInt(id));
+      const numId = parseInt(id, 10);
+      const [inv, meta] = await Promise.all([getInvoice(numId), getInvoiceMetadata(numId)]);
       setInvoice(inv);
+      setMetadata(meta);
     } catch (e) {
       setError('Invoice not found or contracts not deployed.');
       console.error(e);
@@ -43,7 +46,7 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  if (error || !invoice) {
+  if (error || !invoice || !metadata) {
     return (
       <div className="min-h-screen pt-24 px-6 flex flex-col items-center justify-center text-center">
         <p className="text-red-400 mb-4">{error ?? 'Invoice not found.'}</p>
@@ -54,13 +57,13 @@ export default function InvoiceDetailPage() {
     );
   }
 
-  const days = daysUntil(invoice.dueDate);
+  const days = daysUntil(metadata.dueDate);
   const isOwner = wallet.address === invoice.owner;
 
   const timeline = [
     { label: 'Created', ts: invoice.createdAt, done: true },
-    { label: 'Funded', ts: invoice.fundedAt, done: invoice.status !== 'Pending' },
-    { label: 'Paid', ts: invoice.paidAt, done: invoice.status === 'Paid' },
+    { label: 'Funded', ts: invoice.fundedAt, done: metadata.status !== 'Pending' },
+    { label: 'Paid', ts: invoice.paidAt, done: metadata.status === 'Paid' },
   ];
 
   return (
@@ -76,24 +79,33 @@ export default function InvoiceDetailPage() {
 
         {/* Header */}
         <div className="p-6 bg-brand-card border border-brand-border rounded-2xl mb-6">
-          <div className="flex items-start justify-between mb-6">
-            <div>
-              <p className="text-xs text-brand-muted mb-1">Invoice #{invoice.id}</p>
-              <h1 className="text-2xl font-bold">{invoice.debtor}</h1>
+          {metadata.image ? (
+            <div className="mb-6 rounded-xl overflow-hidden border border-brand-border bg-brand-dark">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={metadata.image} alt="" className="w-full h-40 object-cover" />
+            </div>
+          ) : null}
+          <div className="flex items-start justify-between mb-6 gap-4">
+            <div className="min-w-0">
+              <p className="text-xs text-brand-muted mb-1">
+                {metadata.symbol} · Invoice #{invoice.id}
+              </p>
+              <h1 className="text-2xl font-bold">{metadata.name}</h1>
+              <p className="text-brand-muted mt-1">{metadata.debtor}</p>
             </div>
             <span
-              className={`text-sm font-medium px-3 py-1.5 rounded-full badge-${invoice.status.toLowerCase()}`}
+              className={`text-sm font-medium px-3 py-1.5 rounded-full flex-shrink-0 badge-${metadata.status.toLowerCase()}`}
             >
-              {invoice.status}
+              {metadata.status}
             </span>
           </div>
 
-          <div className="text-4xl font-bold gradient-text mb-6">{formatUSDC(invoice.amount)}</div>
+          <div className="text-4xl font-bold gradient-text mb-6">{formatUSDC(metadata.amount)}</div>
 
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <p className="text-brand-muted mb-1">Due Date</p>
-              <p className="font-medium">{formatDate(invoice.dueDate)}</p>
+              <p className="font-medium">{formatDate(metadata.dueDate)}</p>
             </div>
             <div>
               <p className="text-brand-muted mb-1">Time Remaining</p>
@@ -109,10 +121,10 @@ export default function InvoiceDetailPage() {
               <p className="text-brand-muted mb-1">Owner</p>
               <p className="font-mono text-xs text-white break-all">{invoice.owner}</p>
             </div>
-            {invoice.description && (
+            {metadata.description && (
               <div className="col-span-2">
                 <p className="text-brand-muted mb-1">Description</p>
-                <p className="text-sm">{invoice.description}</p>
+                <p className="text-sm">{metadata.description}</p>
               </div>
             )}
           </div>
@@ -145,7 +157,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         {/* Actions */}
-        {isOwner && invoice.status === 'Pending' && (
+        {isOwner && metadata.status === 'Pending' && (
           <div className="p-4 bg-brand-gold/10 border border-brand-gold/20 rounded-xl text-sm text-brand-muted">
             Your invoice is pending review. Once approved, the pool will fund it and USDC will be
             sent to your wallet.

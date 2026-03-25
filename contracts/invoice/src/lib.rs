@@ -6,7 +6,7 @@ use soroban_sdk::{
 };
 
 #[contracttype]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum InvoiceStatus {
     Pending,
     Funded,
@@ -30,6 +30,26 @@ pub struct Invoice {
     pub pool_contract: Address,
 }
 
+/// Wallet / explorer–oriented view derived from [`Invoice`] (no extra storage).
+/// Field names align with common JSON token metadata (`name`, `description`, `image`)
+/// plus invoice-specific attributes; see `contracts/invoice/README.md` for SEP notes.
+#[contracttype]
+#[derive(Clone, PartialEq, Debug)]
+pub struct InvoiceMetadata {
+    pub name: String,
+    pub description: String,
+    /// Placeholder asset URI until per-invoice art exists.
+    pub image: String,
+    pub amount: i128,
+    pub debtor: String,
+    pub due_date: u64,
+    pub status: InvoiceStatus,
+    /// Short ticker, SEP-0041–style (e.g. `INV-1`).
+    pub symbol: String,
+    /// Smallest units per whole token for `amount` (USDC on Stellar uses 7).
+    pub decimals: u32,
+}
+
 #[contracttype]
 pub enum DataKey {
     Invoice(u64),
@@ -40,6 +60,42 @@ pub enum DataKey {
 }
 
 const EVT: Symbol = symbol_short!("INVOICE");
+
+/// Writes decimal digits of `n` into `buf` (left-aligned), returns digit count.
+fn write_u64_decimal(buf: &mut [u8], mut n: u64) -> usize {
+    if n == 0 {
+        if buf.is_empty() {
+            return 0;
+        }
+        buf[0] = b'0';
+        return 1;
+    }
+    let mut i = 0usize;
+    while n > 0 {
+        if i >= buf.len() {
+            break;
+        }
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        i += 1;
+    }
+    let mut lo = 0usize;
+    let mut hi = i - 1;
+    while lo < hi {
+        buf.swap(lo, hi);
+        lo += 1;
+        hi -= 1;
+    }
+    i
+}
+
+fn concat_prefix_u64(env: &Env, prefix: &[u8], id: u64) -> String {
+    let mut buf = [0u8; 40];
+    let plen = prefix.len();
+    buf[..plen].copy_from_slice(prefix);
+    let dlen = write_u64_decimal(&mut buf[plen..], id);
+    String::from_bytes(env, &buf[..plen + dlen])
+}
 
 #[contract]
 pub struct InvoiceContract;
@@ -182,6 +238,31 @@ impl InvoiceContract {
             .expect("invoice not found")
     }
 
+    /// SEP-oriented metadata for invoice id `id` (same ledger fields as `get_invoice`).
+    pub fn get_metadata(env: Env, id: u64) -> InvoiceMetadata {
+        let inv: Invoice = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Invoice(id))
+            .expect("invoice not found");
+
+        let name = concat_prefix_u64(&env, b"Astera Invoice #", inv.id);
+        let symbol = concat_prefix_u64(&env, b"INV-", inv.id);
+        let image = String::from_str(&env, "https://astera.io/metadata/invoice/placeholder.svg");
+
+        InvoiceMetadata {
+            name,
+            description: inv.description.clone(),
+            image,
+            amount: inv.amount,
+            debtor: inv.debtor.clone(),
+            due_date: inv.due_date,
+            status: inv.status.clone(),
+            symbol,
+            decimals: 7,
+        }
+    }
+
     pub fn get_invoice_count(env: Env) -> u64 {
         env.storage().instance().get(&DataKey::InvoiceCount).unwrap_or(0)
     }
@@ -229,12 +310,21 @@ mod test {
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.status, InvoiceStatus::Pending);
 
+        let meta = client.get_metadata(&id);
+        assert_eq!(meta.status, InvoiceStatus::Pending);
+        assert_eq!(meta.amount, 1_000_000_000i128);
+        assert_eq!(meta.decimals, 7u32);
+        assert_eq!(meta.symbol, String::from_str(&env, "INV-1"));
+        assert_eq!(meta.name, String::from_str(&env, "Astera Invoice #1"));
+
         client.mark_funded(&id, &pool);
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.status, InvoiceStatus::Funded);
+        assert_eq!(client.get_metadata(&id).status, InvoiceStatus::Funded);
 
         client.mark_paid(&id, &sme);
         let invoice = client.get_invoice(&id);
         assert_eq!(invoice.status, InvoiceStatus::Paid);
+        assert_eq!(client.get_metadata(&id).status, InvoiceStatus::Paid);
     }
 }

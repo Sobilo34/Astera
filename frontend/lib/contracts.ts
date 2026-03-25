@@ -10,7 +10,13 @@ import {
   Address,
 } from './stellar';
 import { TransactionBuilder, BASE_FEE, Contract, rpc as StellarRpc } from '@stellar/stellar-sdk';
-import type { Invoice, InvestorPosition, PoolConfig, FundedInvoice } from './types';
+import type {
+  Invoice,
+  InvoiceMetadata,
+  InvestorPosition,
+  PoolConfig,
+  FundedInvoice,
+} from './types';
 
 // ---- Invoice Contract ----
 
@@ -25,6 +31,31 @@ export async function getInvoice(id: number): Promise<Invoice> {
 
   const result = (sim as StellarRpc.Api.SimulateTransactionSuccessResponse).result;
   return scValToNative(result!.retval) as Invoice;
+}
+
+export async function getInvoiceMetadata(id: number): Promise<InvoiceMetadata> {
+  const sim = await simulateTx(
+    INVOICE_CONTRACT_ID,
+    'get_metadata',
+    [nativeToScVal(id, { type: 'u64' })],
+    'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
+  );
+
+  const result = (sim as StellarRpc.Api.SimulateTransactionSuccessResponse).result;
+  const raw = scValToNative(result!.retval) as Record<string, unknown>;
+  const due = raw.due_date !== undefined ? Number(raw.due_date) : Number(raw.dueDate);
+
+  return {
+    name: raw.name as string,
+    description: raw.description as string,
+    image: raw.image as string,
+    amount: BigInt(String(raw.amount)),
+    debtor: raw.debtor as string,
+    dueDate: due,
+    status: raw.status as InvoiceMetadata['status'],
+    symbol: raw.symbol as string,
+    decimals: Number(raw.decimals),
+  };
 }
 
 export async function getInvoiceCount(): Promise<number> {
@@ -148,14 +179,12 @@ export async function buildDepositTx(investor: string, amount: bigint): Promise<
   return prepared.toXDR();
 }
 
-export async function getFundedInvoice(
-  invoiceId: number
-): Promise<FundedInvoice | null> {
+export async function getFundedInvoice(invoiceId: number): Promise<FundedInvoice | null> {
   const sim = await simulateTx(
     POOL_CONTRACT_ID,
-    "get_funded_invoice",
-    [nativeToScVal(invoiceId, { type: "u64" })],
-    "GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN"
+    'get_funded_invoice',
+    [nativeToScVal(invoiceId, { type: 'u64' })],
+    'GAAZI4TCR3TY5OJHCTJC2A4QSY6CJWJH5IAJTGKIN2ER7LBNVKOCCWN',
   );
 
   const result = (sim as StellarRpc.Api.SimulateTransactionSuccessResponse).result;
@@ -190,13 +219,13 @@ export async function buildInitCoFundingTx(params: {
   })
     .addOperation(
       contract.call(
-        "init_co_funding",
+        'init_co_funding',
         new Address(params.admin).toScVal(),
-        nativeToScVal(params.invoiceId, { type: "u64" }),
-        nativeToScVal(params.principal, { type: "i128" }),
+        nativeToScVal(params.invoiceId, { type: 'u64' }),
+        nativeToScVal(params.principal, { type: 'i128' }),
         new Address(params.sme).toScVal(),
-        nativeToScVal(params.dueDate, { type: "u64" })
-      )
+        nativeToScVal(params.dueDate, { type: 'u64' }),
+      ),
     )
     .setTimeout(30)
     .build();
@@ -224,11 +253,11 @@ export async function buildCommitToInvoiceTx(params: {
   })
     .addOperation(
       contract.call(
-        "commit_to_invoice",
+        'commit_to_invoice',
         new Address(params.investor).toScVal(),
-        nativeToScVal(params.invoiceId, { type: "u64" }),
-        nativeToScVal(params.amount, { type: "i128" })
-      )
+        nativeToScVal(params.invoiceId, { type: 'u64' }),
+        nativeToScVal(params.amount, { type: 'i128' }),
+      ),
     )
     .setTimeout(30)
     .build();

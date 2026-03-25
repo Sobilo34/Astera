@@ -1,9 +1,10 @@
-import type { Invoice } from '@/lib/types';
+import type { InvoiceMetadata } from '@/lib/types';
 import { formatUSDC, formatDate, daysUntil } from '@/lib/stellar';
 import Link from 'next/link';
 
 interface Props {
-  invoice: Invoice;
+  id: number;
+  metadata: InvoiceMetadata;
   /** Amount committed toward this invoice so far (only relevant for Pending invoices) */
   fundedAmount?: bigint;
 }
@@ -15,43 +16,54 @@ const statusLabel: Record<string, string> = {
   Defaulted: 'Defaulted',
 };
 
-export default function InvoiceCard({ invoice, fundedAmount }: Props) {
-  const days = daysUntil(invoice.dueDate);
+export default function InvoiceCard({ id, metadata, fundedAmount }: Props) {
+  const days = daysUntil(metadata.dueDate);
   const isOverdue = days < 0;
 
   const showProgress =
-    invoice.status === "Pending" &&
-    fundedAmount !== undefined &&
-    invoice.amount > 0n;
+    metadata.status === 'Pending' && fundedAmount !== undefined && metadata.amount > 0n;
 
   const fundedPercent = showProgress
-    ? Number((fundedAmount! * 10_000n) / invoice.amount) / 100
+    ? Number((fundedAmount! * 10_000n) / metadata.amount) / 100
     : 0;
 
   return (
     <Link
-      href={`/invoice/${invoice.id}`}
+      href={`/invoice/${id}`}
       className="block p-5 bg-brand-card border border-brand-border rounded-2xl hover:border-brand-gold/30 transition-colors group"
     >
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <p className="text-xs text-brand-muted mb-1">Invoice #{invoice.id}</p>
-          <h3 className="font-semibold text-lg group-hover:text-brand-gold transition-colors">
-            {invoice.debtor}
-          </h3>
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex gap-3 min-w-0 flex-1">
+          {metadata.image ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={metadata.image}
+              alt=""
+              className="w-12 h-12 rounded-xl object-cover border border-brand-border flex-shrink-0 bg-brand-dark"
+            />
+          ) : null}
+          <div className="min-w-0">
+            <p className="text-xs text-brand-muted mb-1">
+              {metadata.symbol} · #{id}
+            </p>
+            <h3 className="font-semibold text-lg group-hover:text-brand-gold transition-colors line-clamp-2">
+              {metadata.name}
+            </h3>
+            <p className="text-sm text-brand-muted truncate mt-0.5">{metadata.debtor}</p>
+          </div>
         </div>
         <span
-          className={`text-xs font-medium px-2.5 py-1 rounded-full badge-${invoice.status.toLowerCase()}`}
+          className={`text-xs font-medium px-2.5 py-1 rounded-full flex-shrink-0 badge-${metadata.status.toLowerCase()}`}
         >
-          {statusLabel[invoice.status]}
+          {statusLabel[metadata.status]}
         </span>
       </div>
 
-      <div className="text-2xl font-bold mb-4">{formatUSDC(invoice.amount)}</div>
+      <div className="text-2xl font-bold mb-4">{formatUSDC(metadata.amount)}</div>
 
       <div className="flex items-center justify-between text-sm text-brand-muted">
         <div>
-          Due <span className="text-white">{formatDate(invoice.dueDate)}</span>
+          Due <span className="text-white">{formatDate(metadata.dueDate)}</span>
         </div>
         <div
           className={
@@ -66,9 +78,7 @@ export default function InvoiceCard({ invoice, fundedAmount }: Props) {
         <div className="mt-4 border-t border-brand-border pt-4">
           <div className="flex items-center justify-between text-xs text-brand-muted mb-1.5">
             <span>Co-funding progress</span>
-            <span className="text-white font-medium">
-              {fundedPercent.toFixed(1)}%
-            </span>
+            <span className="text-white font-medium">{fundedPercent.toFixed(1)}%</span>
           </div>
           <div className="h-1.5 bg-brand-border rounded-full overflow-hidden">
             <div
@@ -77,19 +87,17 @@ export default function InvoiceCard({ invoice, fundedAmount }: Props) {
             />
           </div>
           <div className="flex items-center justify-between text-xs mt-1.5">
+            <span className="text-brand-muted">{formatUSDC(fundedAmount!)} committed</span>
             <span className="text-brand-muted">
-              {formatUSDC(fundedAmount!)} committed
-            </span>
-            <span className="text-brand-muted">
-              {formatUSDC(invoice.amount - fundedAmount!)} remaining
+              {formatUSDC(metadata.amount - fundedAmount!)} remaining
             </span>
           </div>
         </div>
       )}
 
-      {invoice.description && (
+      {metadata.description && (
         <p className="mt-3 text-xs text-brand-muted line-clamp-2 border-t border-brand-border pt-3">
-          {invoice.description}
+          {metadata.description}
         </p>
       )}
     </Link>

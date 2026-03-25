@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { useStore } from '@/lib/store';
 import InvoiceCard from '@/components/InvoiceCard';
 import CreditScore from '@/components/CreditScore';
-import { getInvoice, getInvoiceCount, getFundedInvoice } from '@/lib/contracts';
+import { getInvoice, getInvoiceCount, getInvoiceMetadata, getFundedInvoice } from '@/lib/contracts';
 import { formatUSDC } from '@/lib/stellar';
-import type { Invoice } from '@/lib/types';
+import type { Invoice, InvoiceMetadata } from '@/lib/types';
+
+type DashboardRow = { invoice: Invoice; metadata: InvoiceMetadata };
 
 type StatusFilter = Invoice['status'] | 'All';
 type SortOption = 'newest' | 'oldest' | 'highest' | 'due-soonest';
@@ -23,7 +25,7 @@ const SORT_OPTIONS: { value: SortOption; label: string }[] = [
 
 export default function DashboardPage() {
   const { wallet } = useStore();
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [invoices, setInvoices] = useState<DashboardRow[]>([]);
   const [committedMap, setCommittedMap] = useState<Record<number, bigint>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,22 +47,30 @@ export default function DashboardPage() {
     setError(null);
     try {
       const count = await getInvoiceCount();
-      const all: Invoice[] = [];
-      for (let i = 1; i <= count; i++) {
-        const inv = await getInvoice(i);
-        if (inv.owner === wallet.address) all.push(inv);
-      }
+      const fetched = await Promise.all(
+        Array.from({ length: count }, (_, j) => j + 1).map(async (i) => {
+          const invoice = await getInvoice(i);
+          return { id: i, invoice };
+        }),
+      );
+      const mine = fetched.filter((row) => row.invoice.owner === wallet.address);
+      const all: DashboardRow[] = await Promise.all(
+        mine.map(async ({ id, invoice }) => ({
+          invoice,
+          metadata: await getInvoiceMetadata(id),
+        })),
+      );
       setInvoices(all);
 
       // Fetch co-funding progress for pending invoices
       const committed: Record<number, bigint> = {};
       await Promise.all(
         all
-          .filter((inv) => inv.status === 'Pending')
-          .map(async (inv) => {
+          .filter((row) => row.invoice.status === 'Pending')
+          .map(async (row) => {
             try {
-              const record = await getFundedInvoice(inv.id);
-              if (record) committed[inv.id] = record.committed;
+              const record = await getFundedInvoice(row.invoice.id);
+              if (record) committed[row.invoice.id] = record.committed;
             } catch {
               // Not registered for co-funding yet — leave uncommitted
             }
@@ -77,11 +87,11 @@ export default function DashboardPage() {
 
   const stats = {
     total: invoices.length,
-    pending: invoices.filter((i) => i.status === 'Pending').length,
-    funded: invoices.filter((i) => i.status === 'Funded').length,
-    paid: invoices.filter((i) => i.status === 'Paid').length,
-    defaulted: invoices.filter((i) => i.status === 'Defaulted').length,
-    totalVolume: invoices.reduce((acc, i) => acc + i.amount, 0n),
+    pending: invoices.filter((row) => row.invoice.status === 'Pending').length,
+    funded: invoices.filter((row) => row.invoice.status === 'Funded').length,
+    paid: invoices.filter((row) => row.invoice.status === 'Paid').length,
+    defaulted: invoices.filter((row) => row.invoice.status === 'Defaulted').length,
+    totalVolume: invoices.reduce((acc, row) => acc + row.invoice.amount, 0n),
   };
 
   const filtered = useMemo(() => {
@@ -90,26 +100,35 @@ export default function DashboardPage() {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       result = result.filter(
-        (inv) => inv.debtor.toLowerCase().includes(q) || inv.description.toLowerCase().includes(q),
+        (row) =>
+          row.metadata.debtor.toLowerCase().includes(q) ||
+          row.metadata.description.toLowerCase().includes(q) ||
+          row.metadata.name.toLowerCase().includes(q),
       );
     }
 
     if (statusFilter !== 'All') {
-      result = result.filter((inv) => inv.status === statusFilter);
+      result = result.filter((row) => row.invoice.status === statusFilter);
     }
 
     switch (sort) {
       case 'newest':
-        result.sort((a, b) => b.createdAt - a.createdAt);
+        result.sort((a, b) => b.invoice.createdAt - a.invoice.createdAt);
         break;
       case 'oldest':
-        result.sort((a, b) => a.createdAt - b.createdAt);
+        result.sort((a, b) => a.invoice.createdAt - b.invoice.createdAt);
         break;
       case 'highest':
-        result.sort((a, b) => (b.amount > a.amount ? 1 : b.amount < a.amount ? -1 : 0));
+        result.sort((a, b) =>
+          b.metadata.amount > a.metadata.amount
+            ? 1
+            : b.metadata.amount < a.metadata.amount
+              ? -1
+              : 0,
+        );
         break;
       case 'due-soonest':
-        result.sort((a, b) => a.dueDate - b.dueDate);
+        result.sort((a, b) => a.metadata.dueDate - b.metadata.dueDate);
         break;
     }
 
@@ -274,8 +293,13 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {filtered.map((inv) => (
-                      <InvoiceCard key={inv.id} invoice={inv} fundedAmount={committedMap[inv.id]} />
+                    {filtered.map((row) => (
+                      <InvoiceCard
+                        key={row.invoice.id}
+                        id={row.invoice.id}
+                        metadata={row.metadata}
+                        fundedAmount={committedMap[row.invoice.id]}
+                      />
                     ))}
                   </div>
                 )}
